@@ -10,7 +10,8 @@
             </div>
             <div class="progress-hero-actions">
                 <a href="?controller=test&action=list" class="btn btn-primary">Làm bài kiểm tra</a>
-                <a href="?controller=lesson&action=index&course_id=1" class="btn btn-secondary">Tiếp tục học</a>
+                <?php $resumeCourseId = (int)($activeCourses[0]['id'] ?? 1); ?>
+                <a href="?controller=lesson&action=index&course_id=<?php echo $resumeCourseId; ?>" class="btn btn-secondary">Tiếp tục học</a>
             </div>
         </section>
 

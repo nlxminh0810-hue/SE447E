@@ -14,7 +14,7 @@
                 <h1>Xác nhận đăng ký khoá học</h1>
                 <p>Hoàn tất thanh toán để bắt đầu lộ trình học của bạn.</p>
             </div>
-            <a href="?controller=course&action=detail&course=<?php echo urlencode($course['slug'] ?? ($course['id'] ?? '')); ?>" class="btn btn-secondary">Xem chi tiết lại</a>
+            <a href="<?php echo !empty($course['id']) ? '?controller=course&action=detail&id=' . (int)$course['id'] : '?controller=course&action=detail&course=' . urlencode($course['slug'] ?? 'toeic'); ?>" class="btn btn-secondary">Xem chi tiết lại</a>
         </section>
 
         <?php if ($paymentSuccess): ?>
@@ -28,7 +28,7 @@
         <div class="checkout-grid">
             <section class="checkout-form-card">
                 <h2>Thông tin thanh toán</h2>
-                <form method="post" action="?controller=course&action=checkout&course=<?php echo urlencode($course['slug'] ?? ($course['id'] ?? '')); ?>" class="checkout-form">
+                <form method="post" action="<?php echo !empty($course['id']) ? '?controller=course&action=checkout&id=' . (int)$course['id'] : '?controller=course&action=checkout&course=' . urlencode($course['slug'] ?? 'toeic'); ?>" class="checkout-form">
                     <div class="form-row">
                         <label>Họ và tên</label>
                         <input type="text" name="customer_name" placeholder="Nhập họ tên của bạn" value="<?php echo htmlspecialchars($user['full_name'] ?? $user['name'] ?? $user['username'] ?? ''); ?>" required>

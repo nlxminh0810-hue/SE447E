@@ -1,6 +1,7 @@
 <?php require_once 'View/layout/header-dashboard.php'; ?>
 <?php require_once 'View/layout/sidebar.php'; ?>
 
+<?php $firstLessonId = (int)($currentLesson['id'] ?? 0); ?>
 <div class="dashboard-layout">
     <div class="dashboard-container lesson-list-page">
         <section class="lesson-hero-card">
@@ -13,7 +14,7 @@
                 </p>
                 <div class="lesson-hero-actions">
                     <a href="?controller=course" class="btn btn-secondary">Quay lại khoá học</a>
-                    <a href="?controller=lesson&action=view&id=<?php echo (int)($currentLesson['id'] ?? 1); ?>" class="btn btn-primary">Bắt đầu học ngay</a>
+                    <a href="?controller=lesson&action=view&id=<?php echo $firstLessonId; ?>" class="btn btn-primary">Bắt đầu học ngay</a>
                 </div>
             </div>
 
@@ -39,8 +40,8 @@
                 <h2>Lộ trình bài học</h2>
                 <div class="lesson-steps">
                     <?php foreach ($lessons as $lesson): ?>
-                        <a class="lesson-step <?php echo ((int)$lesson['id'] === (int)($currentLesson['id'] ?? 0)) ? 'active' : ''; ?>" href="?controller=lesson&action=view&id=<?php echo (int)$lesson['id']; ?>">
-                            <span class="step-badge"><?php echo (int)$lesson['id']; ?></span>
+                        <a class="lesson-step <?php echo ((int)($lesson['id'] ?? 0) === (int)($currentLesson['id'] ?? 0)) ? 'active' : ''; ?>" href="<?php echo !empty($lesson['id']) ? '?controller=lesson&action=view&id=' . (int)$lesson['id'] : '#lesson-content'; ?>">
+                            <span class="step-badge"><?php echo (int)($lesson['order_index'] ?? 1); ?></span>
                             <span>
                                 <strong><?php echo htmlspecialchars($lesson['title']); ?></strong>
                                 <small><?php echo htmlspecialchars($lesson['duration']); ?> · <?php echo htmlspecialchars($lesson['type']); ?></small>
@@ -50,7 +51,7 @@
                 </div>
             </aside>
 
-            <div class="lesson-content-card">
+                <div class="lesson-content-card" id="lesson-content">
                 <div class="lesson-content-top">
                     <div>
                         <div class="course-tag">Today's Focus</div>
@@ -78,16 +79,30 @@
                     </div>
                 </div>
 
+                <?php
+                    $previewUrl = trim($currentLesson['video_url'] ?? '');
+                    $previewId = '';
+                    if (preg_match('~(?:youtube\.com/(?:watch\?v=|embed/)|youtu\.be/)([A-Za-z0-9_-]{11})~', $previewUrl, $previewMatch)) $previewId = $previewMatch[1];
+                ?>
+                <div class="lesson-study-section">
+                    <h3><?php echo htmlspecialchars($currentLesson['title'] ?? 'Bài học'); ?></h3>
+                    <p><?php echo htmlspecialchars($currentLesson['notes'] ?? ''); ?></p>
+                </div>
                 <div class="lesson-video-card">
-                    <div class="lesson-video-placeholder">
-                        <span>▶</span>
-                        <p>Video / Lesson Preview</p>
-                    </div>
+                    <?php if ($previewId !== ''): ?>
+                        <iframe class="lesson-video-frame" src="https://www.youtube-nocookie.com/embed/<?php echo htmlspecialchars($previewId, ENT_QUOTES, 'UTF-8'); ?>" title="<?php echo htmlspecialchars($currentLesson['title'] ?? 'Video bài học', ENT_QUOTES, 'UTF-8'); ?>" loading="lazy" allowfullscreen></iframe>
+                    <?php elseif (preg_match('~^https://[^\s]+\.mp4(?:\?[^\s]*)?$~i', $previewUrl)): ?>
+                        <video class="lesson-video-frame" controls preload="metadata"><source src="<?php echo htmlspecialchars($previewUrl, ENT_QUOTES, 'UTF-8'); ?>" type="video/mp4"></video>
+                    <?php else: ?>
+                        <div class="lesson-player-placeholder"><span>▶</span><p>Chưa có video cho bài học này.</p></div>
+                    <?php endif; ?>
                 </div>
 
                 <div class="lesson-actions-row">
-                    <a href="?controller=lesson&action=view&id=<?php echo (int)($currentLesson['id'] ?? 1); ?>" class="btn btn-primary">Mở bài học</a>
-                    <a href="?controller=course&action=checkout&course=toeic" class="btn btn-secondary">Đăng ký khoá học</a>
+                    <?php if (!empty($currentLesson['id'])): ?>
+                        <a href="?controller=lesson&action=view&id=<?php echo (int)$currentLesson['id']; ?>" class="btn btn-primary">Mở bài học</a>
+                    <?php endif; ?>
+                    <a href="?controller=course&action=detail&course=<?php echo urlencode(get_course_slug_for_lesson($currentLesson['course_id'] ?? 0)); ?>" class="btn btn-secondary">Thông tin khóa học</a>
                 </div>
             </div>
         </section>

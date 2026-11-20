@@ -1979,6 +1979,47 @@ body.with-sidebar {
     border: 1px dashed #cfe0ff;
 }
 
+.lesson-player-card {
+    overflow: hidden;
+}
+
+.lesson-video-frame {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border: 0;
+    border-radius: 18px;
+    background: #101827;
+}
+
+.course-promo-video .lesson-video-frame {
+    display: block;
+    width: 100%;
+    min-height: 280px;
+    border: 0;
+    border-radius: 12px;
+    background: #111;
+}
+
+.course-promo-video video.lesson-video-frame {
+    height: auto;
+}
+
+.course-video-indicator {
+    display: inline-block;
+    margin-top: 6px;
+    color: #8de5b4;
+    font-size: 0.8rem;
+}
+
+.course-video-indicator.course-video-missing {
+    color: #c5c8d0;
+}
+
+.lesson-player-card video.lesson-video-frame {
+    height: auto;
+}
+
 .lesson-video-placeholder span,
 .lesson-player-placeholder span {
     font-size: 3rem;

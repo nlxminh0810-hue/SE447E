@@ -39,6 +39,10 @@
                     <input name="thumbnail_url" value="<?php echo htmlspecialchars($course['thumbnail_url'] ?? ''); ?>">
                 </div>
                 <div class="form-row">
+                    <label>Video giới thiệu (YouTube/Vimeo/MP4 URL)</label>
+                    <input name="promo_video_url" type="url" value="<?php echo htmlspecialchars($course['promo_video_url'] ?? ''); ?>" placeholder="https://www.youtube.com/watch?v=...">
+                </div>
+                <div class="form-row">
                     <label>Owner / Teacher</label>
                     <select name="teacher_id">
                         <option value="">-- Không thay đổi --</option>

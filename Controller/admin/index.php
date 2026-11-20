@@ -472,6 +472,7 @@ switch($action) {
                 'price' => floatval(str_replace(',', '', $_POST['price'] ?? 0)),
                 'level' => trim($_POST['level'] ?? ''),
                 'thumbnail_url' => trim($_POST['thumbnail_url'] ?? ''),
+                'promo_video_url' => trim($_POST['promo_video_url'] ?? ''),
                 'status' => isset($_POST['status']) ? 1 : 0,
                 'teacher_id' => isset($_POST['teacher_id']) && $_POST['teacher_id'] !== '' ? (int)$_POST['teacher_id'] : ($_SESSION['user']['id'] ?? null),
             ];
@@ -482,6 +483,9 @@ switch($action) {
             }
             if (!is_numeric($data['price'])) {
                 $data['price'] = 0;
+            }
+            if ($data['promo_video_url'] !== '' && !preg_match('~^https://(?:www\.)?(?:youtube\.com/watch\?v=[A-Za-z0-9_-]{11}|youtu\.be/[A-Za-z0-9_-]{11}|player\.vimeo\.com/video/[0-9]+)|^https://[^\s]+\.mp4(?:\?[^\s]*)?$~i', $data['promo_video_url'])) {
+                $error = 'Video cần là link YouTube, Vimeo hoặc MP4 hợp lệ (HTTPS).';
             }
             if ($error) {
                 require_once 'View/admin/course_form.php';
@@ -510,6 +514,7 @@ switch($action) {
                 'price' => floatval(str_replace(',', '', $_POST['price'] ?? 0)),
                 'level' => trim($_POST['level'] ?? ''),
                 'thumbnail_url' => trim($_POST['thumbnail_url'] ?? ''),
+                'promo_video_url' => trim($_POST['promo_video_url'] ?? ''),
                 'status' => isset($_POST['status']) ? 1 : 0,
             ];
             // do not overwrite teacher_id unless explicitly provided
@@ -520,6 +525,9 @@ switch($action) {
             $error = null;
             if (empty($data['title'])) {
                 $error = 'Title is required';
+            }
+            if ($data['promo_video_url'] !== '' && !preg_match('~^https://(?:www\.)?(?:youtube\.com/watch\?v=[A-Za-z0-9_-]{11}|youtu\.be/[A-Za-z0-9_-]{11}|player\.vimeo\.com/video/[0-9]+)|^https://[^\s]+\.mp4(?:\?[^\s]*)?$~i', $data['promo_video_url'])) {
+                $error = 'Video cần là link YouTube, Vimeo hoặc MP4 hợp lệ (HTTPS).';
             }
             if (!is_numeric($data['price'])) {
                 $data['price'] = 0;

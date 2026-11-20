@@ -145,7 +145,26 @@ function asset_image_url($fileName) {
 
 function get_course_by_slug($slug) {
     $catalog = get_course_catalog();
-    return isset($catalog[$slug]) ? $catalog[$slug] : reset($catalog);
+    if (isset($catalog[$slug])) return $catalog[$slug];
+    if (preg_match('/^[a-z0-9-]+$/i', (string)$slug)) {
+        $title = ucwords(str_replace('-', ' ', $slug));
+        return [
+            'slug' => $slug,
+            'title' => $title,
+            'tag' => 'Course',
+            'level' => 'All levels',
+            'price' => '0 VNĐ',
+            'image' => 'default-course.jpg',
+            'short_description' => 'Thông tin khóa học.',
+            'duration' => 'Linh hoạt',
+            'lessons' => 0,
+            'students' => 0,
+            'benefits' => [],
+            'outline' => [],
+            'payment_note' => 'Liên hệ quản trị viên để biết thêm thông tin.',
+        ];
+    }
+    return reset($catalog);
 }
 
 function get_course_id_by_slug($slug) {
@@ -163,7 +182,11 @@ function get_course_id_by_slug($slug) {
     ];
 
     if (!isset($courseTitleMap[$slug])) {
-        return 1;
+        $title = ucwords(str_replace('-', ' ', (string)$slug));
+        $title = $db->escapeString($title);
+        $db->execute("SELECT id FROM courses WHERE title = '{$title}' ORDER BY id DESC LIMIT 1");
+        $row = $db->getData();
+        return !empty($row['id']) ? (int)$row['id'] : 0;
     }
 
     $title = $db->escapeString($courseTitleMap[$slug]);
@@ -173,7 +196,20 @@ function get_course_id_by_slug($slug) {
         return (int)$row['id'];
     }
 
-    return 1;
+    return 0;
+}
+
+function get_course_slug_by_id($courseId) {
+    global $db;
+    $course = $db->getDataWhere('courses', 'id = ' . (int)$courseId);
+    $slugByTitle = [
+        'TOEIC Intensive' => 'toeic', 'IELTS Mastery' => 'ielts',
+        'B1 Communicative' => 'b1', 'B2 Fluency' => 'b2',
+        'Reading Skills' => 'reading', 'Listening Skills' => 'listening',
+        'Writing Skills' => 'writing', 'Speaking Skills' => 'speaking',
+    ];
+    if (isset($slugByTitle[$course['title'] ?? ''])) return $slugByTitle[$course['title']];
+    return strtolower(trim(preg_replace('/[^a-z0-9]+/i', '-', $course['title'] ?? 'course'), '-'));
 }
 
 $action = isset($_GET['action']) ? $_GET['action'] : 'home';
@@ -218,13 +254,31 @@ switch($action) {
     // Chi tiết khóa học
     case 'detail': {
         $courseSlug = isset($_GET['course']) ? trim($_GET['course']) : 'toeic';
+        if (!empty($_GET['id'])) $courseSlug = get_course_slug_by_id((int)$_GET['id']);
         $course = get_course_by_slug($courseSlug);
+        $courseId = !empty($_GET['id']) ? (int)$_GET['id'] : get_course_id_by_slug($courseSlug);
+        if ($courseId <= 0 && !empty($course['title'])) {
+            $title = $db->escapeString($course['title']);
+            $db->execute("SELECT id FROM courses WHERE title = '{$title}' LIMIT 1");
+            $existingCourse = $db->getData();
+            $courseId = (int)($existingCourse['id'] ?? 0);
+        }
+        $dbCourse = $courseId > 0 ? $db->getDataWhere('courses', 'id = ' . $courseId) : [];
+        if (!empty($dbCourse)) {
+            $course['id'] = $courseId;
+            $course['title'] = $dbCourse['title'];
+            $course['short_description'] = $dbCourse['description'] ?? $course['short_description'];
+            $course['price'] = $dbCourse['price'] ?? $course['price'];
+            $course['level'] = $dbCourse['level'] ?? $course['level'];
+            $course['image'] = $dbCourse['thumbnail_url'] ?? $course['image'];
+        }
+        if (!empty($dbCourse['promo_video_url'])) $course['promo_video_url'] = $dbCourse['promo_video_url'];
+        if (!empty($dbCourse['thumbnail_url'])) $course['image'] = $dbCourse['thumbnail_url'];
         // determine enrollment status for current user
         $isEnrolled = false;
         if (Auth::isLoggedIn()) {
             require_once 'Model/CourseModel.php';
             $courseModel = new CourseModel($db);
-            $courseId = get_course_id_by_slug($courseSlug);
             $userId = $_SESSION['user']['id'] ?? null;
             if ($userId) {
                 $isEnrolled = $courseModel->isEnrolled($userId, $courseId);
@@ -237,11 +291,26 @@ switch($action) {
     // Thanh toán khóa học
     case 'checkout': {
         $courseSlug = isset($_GET['course']) ? trim($_GET['course']) : 'toeic';
+        $requestedCourseId = !empty($_GET['id']) ? (int)$_GET['id'] : 0;
+        if ($requestedCourseId) $courseSlug = get_course_slug_by_id($requestedCourseId);
         $course = get_course_by_slug($courseSlug);
+        if ($requestedCourseId) {
+            $dbCourse = $db->getDataWhere('courses', 'id = ' . $requestedCourseId);
+            if (!empty($dbCourse)) {
+                $course['id'] = $requestedCourseId;
+                $course['title'] = $dbCourse['title'];
+                $course['short_description'] = $dbCourse['description'] ?? '';
+                $course['price'] = $dbCourse['price'] ?? 0;
+                $course['level'] = $dbCourse['level'] ?? '';
+                $course['image'] = $dbCourse['thumbnail_url'] ?? 'default-course.jpg';
+            }
+        }
 
         // If user is not logged in, redirect to login before showing checkout
         if (!Auth::isLoggedIn()) {
-            $next = '?controller=course&action=checkout&course=' . urlencode($courseSlug);
+            $next = $requestedCourseId
+                ? '?controller=course&action=checkout&id=' . $requestedCourseId
+                : '?controller=course&action=checkout&course=' . urlencode($courseSlug);
             header('Location: ?controller=auth&action=login&next=' . urlencode($next));
             exit;
         }
@@ -252,7 +321,30 @@ switch($action) {
             Auth::requireLogin();
             $userId = $_SESSION['user']['id'] ?? null;
             if ($userId) {
-                $courseId = get_course_id_by_slug($courseSlug);
+                $courseId = $requestedCourseId ?: get_course_id_by_slug($courseSlug);
+
+                if ($courseId <= 0) {
+                    $catalogCourse = get_course_by_slug($courseSlug);
+                    $priceRaw = isset($catalogCourse['price']) ? preg_replace('/[^0-9.]/', '', $catalogCourse['price']) : '0';
+                    $courseTitle = $db->escapeString($catalogCourse['title'] ?? $courseSlug);
+                    $db->execute("SELECT id FROM courses WHERE title = '{$courseTitle}' LIMIT 1");
+                    $existingCourse = $db->getData();
+                    $courseId = (int)($existingCourse['id'] ?? 0);
+                }
+                if ($courseId <= 0) {
+                    $catalogCourse = get_course_by_slug($courseSlug);
+                    $priceRaw = isset($catalogCourse['price']) ? preg_replace('/[^0-9.]/', '', $catalogCourse['price']) : '0';
+                    $db->insert('courses', [
+                        'title' => $catalogCourse['title'] ?? $courseSlug,
+                        'description' => $catalogCourse['short_description'] ?? '',
+                        'price' => (float)$priceRaw,
+                        'level' => $catalogCourse['level'] ?? '',
+                        'thumbnail_url' => 'public/images/' . ($catalogCourse['image'] ?? 'default-course.jpg'),
+                        'promo_video_url' => trim((string)(getenv('ENGLISHAI_COURSE_VIDEO_' . strtoupper($courseSlug)) ?: '')),
+                        'status' => 1,
+                    ]);
+                    $courseId = $db->getInsertId();
+                }
 
                 // Ensure the course exists in DB (to satisfy FK). If not, create a minimal record.
                 $existingCourse = $db->getDataWhere('courses', "id = '$courseId'");
@@ -268,6 +360,7 @@ switch($action) {
                         'price' => $priceVal,
                         'level' => $catalogCourse['level'] ?? null,
                         'thumbnail_url' => isset($catalogCourse['image']) ? 'public/images/' . $catalogCourse['image'] : null,
+                        'promo_video_url' => trim((string)(getenv('ENGLISHAI_COURSE_VIDEO_' . strtoupper($courseSlug)) ?: '')),
                         'status' => 1,
                     ];
                     // Insert minimal course record
@@ -286,7 +379,7 @@ switch($action) {
                     // set flash message and redirect to user's course list
                     $_SESSION['flash_message'] = 'Bạn đã mua khóa học thành công. Chúc bạn học tốt!';
                     $_SESSION['flash_type'] = 'success';
-                    header('Location: ?controller=course&action=list');
+                    header('Location: ?controller=lesson&action=index&course_id=' . (int)$courseId);
                     exit;
                 }
             }

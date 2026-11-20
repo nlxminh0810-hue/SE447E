@@ -10,7 +10,7 @@
             </div>
             <div class="admin-header-actions">
                 <a href="?controller=admin&action=index" class="btn btn-secondary">Dashboard</a>
-                <button type="button" class="btn btn-primary">+ Thêm người dùng</button>
+                <a href="?controller=admin&action=create_user" class="btn btn-primary">+ Thêm người dùng</a>
             </div>
         </section>
 
@@ -20,18 +20,18 @@
                 <span><?php echo count($users); ?> bản ghi</span>
             </div>
             <div class="admin-toolbar-actions">
-                <input type="text" placeholder="Tìm theo tên hoặc email..." aria-label="Tìm kiếm người dùng">
-                <select aria-label="filter role">
-                    <option>Tất cả vai trò</option>
-                    <option>admin</option>
-                    <option>teacher</option>
-                    <option>student</option>
+                <input type="search" placeholder="Tìm theo tên hoặc email..." aria-label="Tìm kiếm người dùng" data-user-search>
+                <select aria-label="Lọc vai trò" data-user-role-filter>
+                    <option value="">Tất cả vai trò</option>
+                    <option value="admin">admin</option>
+                    <option value="teacher">teacher</option>
+                    <option value="student">student</option>
                 </select>
-                <select aria-label="filter status">
-                    <option>Tất cả trạng thái</option>
-                    <option>active</option>
-                    <option>inactive</option>
-                    <option>suspended</option>
+                <select aria-label="Lọc trạng thái" data-user-status-filter>
+                    <option value="">Tất cả trạng thái</option>
+                    <option value="active">active</option>
+                    <option value="inactive">inactive</option>
+                    <option value="suspended">suspended</option>
                 </select>
             </div>
         </section>
@@ -52,7 +52,7 @@
                 </thead>
                 <tbody>
                     <?php foreach ($users as $user): ?>
-                        <tr>
+                        <tr data-user-row data-name="<?php echo htmlspecialchars(strtolower($user['name']), ENT_QUOTES, 'UTF-8'); ?>" data-email="<?php echo htmlspecialchars(strtolower($user['email']), ENT_QUOTES, 'UTF-8'); ?>" data-role="<?php echo htmlspecialchars(strtolower($user['role']), ENT_QUOTES, 'UTF-8'); ?>" data-status="<?php echo htmlspecialchars(strtolower($user['status']), ENT_QUOTES, 'UTF-8'); ?>">
                             <td>#<?php echo (int) $user['id']; ?></td>
                             <td><?php echo htmlspecialchars($user['name']); ?></td>
                             <td><?php echo htmlspecialchars($user['email']); ?></td>

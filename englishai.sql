@@ -76,6 +76,9 @@ CREATE TABLE IF NOT EXISTS courses (
     CONSTRAINT fk_courses_teacher FOREIGN KEY (teacher_id) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Existing databases can apply course-video support without recreating tables.
+ALTER TABLE courses ADD COLUMN IF NOT EXISTS promo_video_url VARCHAR(500) NULL AFTER thumbnail_url;
+
 CREATE TABLE IF NOT EXISTS lessons (
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
     course_id INT UNSIGNED NOT NULL,
@@ -297,9 +300,9 @@ INSERT IGNORE INTO courses (id, title, description, price, level, thumbnail_url,
     (7, 'Writing Skills', 'Thực hành cấu trúc câu, đoạn văn và viết học thuật.', 199000, 'Skill Practice', 'public/images/writing.jpg', 1),
     (8, 'Speaking Skills', 'Luyện phản xạ nói, phát âm và giao tiếp tự tin.', 199000, 'Skill Practice', 'public/images/speak.jpg', 1);
 
-INSERT IGNORE INTO lessons (id, course_id, title, description, content, duration, type, order_index, status) VALUES
-    (1, 1, 'Welcome & Course Overview', 'Làm quen với lộ trình học, nền tảng và mục tiêu khóa học.', 'Bắt đầu bằng việc xác định mục tiêu TOEIC và cách theo dõi tiến độ học tập.', '12 phút', 'Lesson', 1, 1),
-    (2, 1, 'Vocabulary Starter Pack', 'Từ vựng nền tảng theo chủ đề và cách ghi nhớ bằng ngữ cảnh.', 'Học từ mới qua ví dụ thực tế và ôn tập thường xuyên.', '18 phút', 'Practice', 2, 1),
+INSERT IGNORE INTO lessons (id, course_id, title, description, video_url, content, duration, type, order_index, status) VALUES
+    (1, 1, 'Welcome & Course Overview', 'Làm quen với lộ trình học, nền tảng và mục tiêu khóa học.', '', 'Bắt đầu bằng việc xác định mục tiêu TOEIC và cách theo dõi tiến độ học tập.', '12 phút', 'Lesson', 1, 1),
+    (2, 1, 'Vocabulary Starter Pack', 'Từ vựng nền tảng theo chủ đề và cách ghi nhớ bằng ngữ cảnh.', '', 'Học từ mới qua ví dụ thực tế và ôn tập thường xuyên.', '18 phút', 'Practice', 2, 1),
     (3, 1, 'Listening Drill: Short Talks', 'Luyện nghe đoạn hội thoại ngắn và nhận biết từ khóa.', 'Nghe nhiều lần, ghi lại từ khóa và kiểm tra ý chính.', '20 phút', 'Audio + Test', 3, 1),
     (4, 1, 'Speaking Challenge', 'Thực hành mẫu câu, phản xạ và phát âm.', 'Trả lời thành tiếng, ghi âm và tự nghe lại để cải thiện.', '15 phút', 'Speaking', 4, 1),
     (5, 2, 'IELTS Study Roadmap', 'Làm quen với lộ trình và các kỹ năng IELTS.', 'Xác định band mục tiêu và chia thời gian luyện tập cho bốn kỹ năng.', '15 phút', 'Lesson', 1, 1),

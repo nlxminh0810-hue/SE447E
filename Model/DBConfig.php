@@ -102,6 +102,11 @@ class Database {
         if ($this->conn === NULL) $this->connect();
         return $this->conn->real_escape_string($str);
     }
+
+    public function getInsertId() {
+        if ($this->conn === NULL) $this->connect();
+        return (int)$this->conn->insert_id;
+    }
 }
 
 ?>

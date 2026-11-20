@@ -4,10 +4,17 @@
  *
  * Usage:
  *   php public/seed_learning_data.php
- *   or open /public/seed_learning_data.php in the browser.
+ * Requires ENABLE_DATA_SEED=true in .env (or SEED_DATA=true in CLI).
  */
 
+require_once __DIR__ . '/../bootstrap/load_env.php';
 require_once __DIR__ . '/../Model/DBConfig.php';
+
+$seedEnabled = (getenv('ENABLE_DATA_SEED') === 'true') || (PHP_SAPI === 'cli' && getenv('SEED_DATA') === 'true');
+if (!$seedEnabled) {
+    http_response_code(403);
+    exit('Data seeding is disabled. Set ENABLE_DATA_SEED=true in .env or SEED_DATA=true for CLI.');
+}
 
 $db = new Database();
 $conn = $db->connect();
@@ -55,6 +62,7 @@ function upsertCourse($conn, $course, $teacherId = null) {
         'thumbnail_url' => $course['thumbnail_url'],
         'status' => 1,
     ];
+    if (array_key_exists('promo_video_url', $course) && trim((string)$course['promo_video_url']) !== '') $data['promo_video_url'] = $course['promo_video_url'];
     if ($teacherId !== null) {
         $data['teacher_id'] = $teacherId;
     }
@@ -82,6 +90,7 @@ function upsertCourse($conn, $course, $teacherId = null) {
 function upsertLesson($conn, $courseId, $lesson) {
     $title = esc($conn, $lesson['title']);
     $existing = fetchOne($conn, "SELECT id FROM lessons WHERE course_id = '" . (int)$courseId . "' AND title = '{$title}' LIMIT 1");
+    $existingContent = $existing ? fetchOne($conn, "SELECT content FROM lessons WHERE id = '" . (int)$existing['id'] . "'") : null;
 
     $payload = [
         'description' => $lesson['description'],
@@ -90,12 +99,23 @@ function upsertLesson($conn, $courseId, $lesson) {
         'progress' => $lesson['progress'],
         'topics' => $lesson['topics'],
         'notes' => $lesson['notes'],
+        'lesson_content' => $lesson['notes'],
     ];
+    if (!empty($lesson['video_url'])) {
+        $payload['video_url'] = $lesson['video_url'];
+    } elseif ($existingContent && strpos((string)$existingContent['content'], '"lesson_content"') !== false) {
+        $oldPayload = json_decode($existingContent['content'], true);
+        if (!empty($oldPayload['video_url'])) $payload['video_url'] = $oldPayload['video_url'];
+    }
+    $existingVideo = $existing ? fetchOne($conn, "SELECT video_url FROM lessons WHERE id = '" . (int)$existing['id'] . "'") : null;
+    $existingVideoUrl = trim((string)($existingVideo['video_url'] ?? ''));
+    $isSharedPlaceholder = preg_match('~youtube\.com/watch\?v=juKd26qkNAw~i', $existingVideoUrl) === 1;
+    $videoUrl = !empty($lesson['video_url']) ? $lesson['video_url'] : ($isSharedPlaceholder ? '' : $existingVideoUrl);
 
     $data = [
         'course_id' => (int)$courseId,
         'title' => $lesson['title'],
-        'video_url' => $lesson['video_url'],
+        'video_url' => $videoUrl,
         'content' => json_encode($payload, JSON_UNESCAPED_UNICODE),
         'order_index' => (int)$lesson['order_index'],
         'status' => 1,
@@ -119,6 +139,24 @@ function upsertLesson($conn, $courseId, $lesson) {
     $sql = "INSERT INTO lessons ({$columns}) VALUES (" . implode(', ', $values) . ")";
     $conn->query($sql);
     return (int)$conn->insert_id;
+}
+
+function removePlaceholderLessons($conn, $courseId, $titles) {
+    $escaped = [];
+    foreach ($titles as $title) $escaped[] = "'" . esc($conn, $title) . "'";
+    if (!$escaped) return;
+    $conn->query("DELETE FROM lessons WHERE course_id = '" . (int)$courseId . "' AND title IN (" . implode(', ', $escaped) . ")");
+}
+
+function findCourseVideoUrl($title) {
+    $keys = [
+        'TOEIC Intensive' => 'TOEIC', 'IELTS Mastery' => 'IELTS',
+        'B1 Communicative' => 'B1', 'B2 Fluency' => 'B2',
+        'Reading Skills' => 'READING', 'Listening Skills' => 'LISTENING',
+        'Writing Skills' => 'WRITING', 'Speaking Skills' => 'SPEAKING',
+    ];
+    $key = $keys[$title] ?? strtoupper(preg_replace('/[^A-Z0-9]+/i', '_', $title));
+    return trim((string)(getenv('ENGLISHAI_COURSE_VIDEO_' . $key) ?: ''));
 }
 
 function upsertTest($conn, $courseId, $lessonId, $test) {
@@ -200,6 +238,12 @@ function replaceAnswers($conn, $questionId, $answers) {
 }
 
 $teacherId = findTeacherId($conn);
+$schemaResult = $conn->query("SHOW COLUMNS FROM courses LIKE 'promo_video_url'");
+if (!$schemaResult || $schemaResult->num_rows === 0) {
+    if (!$conn->query("ALTER TABLE courses ADD COLUMN promo_video_url VARCHAR(500) NULL AFTER thumbnail_url")) {
+        exit('Cannot add courses.promo_video_url: ' . htmlspecialchars($conn->error));
+    }
+}
 
 $courses = [
     [
@@ -209,10 +253,10 @@ $courses = [
         'level' => 'All levels',
         'thumbnail_url' => 'public/images/toeic.jfif',
         'lessons' => [
-            ['title' => 'Course Orientation & TOEIC Roadmap', 'duration' => '12 phút', 'type' => 'Video + Guide', 'progress' => 10, 'topics' => ['Mục tiêu khóa học', 'Cách học hiệu quả', 'Công cụ theo dõi tiến độ'], 'notes' => 'Xem lộ trình trước để học có kế hoạch rõ ràng.', 'video_url' => 'https://example.com/video/toeic-1.mp4'],
-            ['title' => 'Reading Part 5 Fast Grammar', 'duration' => '18 phút', 'type' => 'Practice', 'progress' => 35, 'topics' => ['Từ loại', 'Dấu hiệu ngữ pháp', 'Mẹo loại đáp án sai'], 'notes' => 'Đọc câu hỏi trước rồi tìm dấu hiệu ngữ pháp.', 'video_url' => 'https://example.com/video/toeic-2.mp4'],
-            ['title' => 'Listening Short Conversations', 'duration' => '20 phút', 'type' => 'Audio + Quiz', 'progress' => 60, 'topics' => ['Nghe keyword', 'Bắt ý chính', 'Bẫy đáp án nghe gần giống'], 'notes' => 'Nghe 2 lần: lần 1 hiểu ý, lần 2 kiểm tra chi tiết.', 'video_url' => 'https://example.com/video/toeic-3.mp4'],
-            ['title' => 'Mini Mock Test & Review', 'duration' => '25 phút', 'type' => 'Mock Test', 'progress' => 85, 'topics' => ['Canh thời gian', 'Rà soát lỗi', 'Tổng kết chiến thuật'], 'notes' => 'Làm bài mô phỏng như thi thật để quen nhịp.', 'video_url' => 'https://example.com/video/toeic-4.mp4'],
+            ['title' => 'Course Orientation & TOEIC Roadmap', 'duration' => '12 phút', 'type' => 'Video + Guide', 'progress' => 10, 'topics' => ['Mục tiêu khóa học', 'Cách học hiệu quả', 'Công cụ theo dõi tiến độ'], 'notes' => 'Xem lộ trình trước để học có kế hoạch rõ ràng.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Reading Part 5 Fast Grammar', 'duration' => '18 phút', 'type' => 'Practice', 'progress' => 35, 'topics' => ['Từ loại', 'Dấu hiệu ngữ pháp', 'Mẹo loại đáp án sai'], 'notes' => 'Đọc câu hỏi trước rồi tìm dấu hiệu ngữ pháp.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Listening Short Conversations', 'duration' => '20 phút', 'type' => 'Audio + Quiz', 'progress' => 60, 'topics' => ['Nghe keyword', 'Bắt ý chính', 'Bẫy đáp án nghe gần giống'], 'notes' => 'Nghe 2 lần: lần 1 hiểu ý, lần 2 kiểm tra chi tiết.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Mini Mock Test & Review', 'duration' => '25 phút', 'type' => 'Mock Test', 'progress' => 85, 'topics' => ['Canh thời gian', 'Rà soát lỗi', 'Tổng kết chiến thuật'], 'notes' => 'Làm bài mô phỏng như thi thật để quen nhịp.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
         ],
         'test' => [
             'title' => 'TOEIC Intensive - Final Check',
@@ -232,10 +276,10 @@ $courses = [
         'level' => 'Upper-Intermediate',
         'thumbnail_url' => 'public/images/ielts.jfif',
         'lessons' => [
-            ['title' => 'Band Target & Study Plan', 'duration' => '14 phút', 'type' => 'Video + Guide', 'progress' => 10, 'topics' => ['Band mục tiêu', 'Lịch học', 'Cách ôn hiệu quả'], 'notes' => 'Lên band mục tiêu trước khi học để bám kế hoạch.', 'video_url' => 'https://example.com/video/ielts-1.mp4'],
-            ['title' => 'Reading Strategies for Skimming', 'duration' => '18 phút', 'type' => 'Practice', 'progress' => 30, 'topics' => ['Skimming', 'Scanning', 'Matching headings'], 'notes' => 'Đọc câu hỏi trước rồi quét thông tin cần tìm.', 'video_url' => 'https://example.com/video/ielts-2.mp4'],
-            ['title' => 'Writing Task 1 Templates', 'duration' => '22 phút', 'type' => 'Practice', 'progress' => 58, 'topics' => ['Overview', 'So sánh số liệu', 'Từ nối học thuật'], 'notes' => 'Học template nhưng phải linh hoạt theo biểu đồ.', 'video_url' => 'https://example.com/video/ielts-3.mp4'],
-            ['title' => 'Speaking Mock Interview', 'duration' => '20 phút', 'type' => 'Speaking', 'progress' => 82, 'topics' => ['Trả lời mạch lạc', 'Tăng độ tự tin', 'Phát triển ý'], 'notes' => 'Trả lời đủ ý và mở rộng câu trả lời.', 'video_url' => 'https://example.com/video/ielts-4.mp4'],
+            ['title' => 'Band Target & Study Plan', 'duration' => '14 phút', 'type' => 'Video + Guide', 'progress' => 10, 'topics' => ['Band mục tiêu', 'Lịch học', 'Cách ôn hiệu quả'], 'notes' => 'Lên band mục tiêu trước khi học để bám kế hoạch.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Reading Strategies for Skimming', 'duration' => '18 phút', 'type' => 'Practice', 'progress' => 30, 'topics' => ['Skimming', 'Scanning', 'Matching headings'], 'notes' => 'Đọc câu hỏi trước rồi quét thông tin cần tìm.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Writing Task 1 Templates', 'duration' => '22 phút', 'type' => 'Practice', 'progress' => 58, 'topics' => ['Overview', 'So sánh số liệu', 'Từ nối học thuật'], 'notes' => 'Học template nhưng phải linh hoạt theo biểu đồ.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Speaking Mock Interview', 'duration' => '20 phút', 'type' => 'Speaking', 'progress' => 82, 'topics' => ['Trả lời mạch lạc', 'Tăng độ tự tin', 'Phát triển ý'], 'notes' => 'Trả lời đủ ý và mở rộng câu trả lời.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
         ],
         'test' => [
             'title' => 'IELTS Mastery - Final Check',
@@ -255,10 +299,10 @@ $courses = [
         'level' => 'B1',
         'thumbnail_url' => 'public/images/b1.jfif',
         'lessons' => [
-            ['title' => 'B1 Core Vocabulary', 'duration' => '12 phút', 'type' => 'Vocabulary', 'progress' => 12, 'topics' => ['Chủ đề hằng ngày', 'Từ vựng thông dụng', 'Phát âm từ mới'], 'notes' => 'Mỗi ngày học 10 từ mới theo ngữ cảnh.', 'video_url' => 'https://example.com/video/b1-1.mp4'],
-            ['title' => 'Basic Grammar Refresh', 'duration' => '16 phút', 'type' => 'Grammar', 'progress' => 34, 'topics' => ['Thì cơ bản', 'Câu hỏi', 'Trật tự từ'], 'notes' => 'Ôn chắc ngữ pháp nền trước khi luyện nói.', 'video_url' => 'https://example.com/video/b1-2.mp4'],
-            ['title' => 'Daily Communication Patterns', 'duration' => '18 phút', 'type' => 'Speaking', 'progress' => 60, 'topics' => ['Chào hỏi', 'Hỏi đường', 'Đặt lịch hẹn'], 'notes' => 'Luyện theo mẫu câu ngắn và tự nhiên.', 'video_url' => 'https://example.com/video/b1-3.mp4'],
-            ['title' => 'B1 Review Test', 'duration' => '20 phút', 'type' => 'Review', 'progress' => 88, 'topics' => ['Tổng ôn', 'Kiểm tra nhanh', 'Củng cố phát âm'], 'notes' => 'Làm bài tổng kết để biết điểm mạnh và điểm yếu.', 'video_url' => 'https://example.com/video/b1-4.mp4'],
+            ['title' => 'B1 Core Vocabulary', 'duration' => '12 phút', 'type' => 'Vocabulary', 'progress' => 12, 'topics' => ['Chủ đề hằng ngày', 'Từ vựng thông dụng', 'Phát âm từ mới'], 'notes' => 'Mỗi ngày học 10 từ mới theo ngữ cảnh.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Basic Grammar Refresh', 'duration' => '16 phút', 'type' => 'Grammar', 'progress' => 34, 'topics' => ['Thì cơ bản', 'Câu hỏi', 'Trật tự từ'], 'notes' => 'Ôn chắc ngữ pháp nền trước khi luyện nói.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Daily Communication Patterns', 'duration' => '18 phút', 'type' => 'Speaking', 'progress' => 60, 'topics' => ['Chào hỏi', 'Hỏi đường', 'Đặt lịch hẹn'], 'notes' => 'Luyện theo mẫu câu ngắn và tự nhiên.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'B1 Review Test', 'duration' => '20 phút', 'type' => 'Review', 'progress' => 88, 'topics' => ['Tổng ôn', 'Kiểm tra nhanh', 'Củng cố phát âm'], 'notes' => 'Làm bài tổng kết để biết điểm mạnh và điểm yếu.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
         ],
         'test' => [
             'title' => 'B1 Communicative - Final Check',
@@ -278,10 +322,10 @@ $courses = [
         'level' => 'B2',
         'thumbnail_url' => 'public/images/b2.jfif',
         'lessons' => [
-            ['title' => 'Advanced Vocabulary Expansion', 'duration' => '14 phút', 'type' => 'Vocabulary', 'progress' => 15, 'topics' => ['Idioms', 'Phrasal verbs', 'Collocations'], 'notes' => 'Học từ đi kèm ví dụ để nhớ lâu.', 'video_url' => 'https://example.com/video/b2-1.mp4'],
-            ['title' => 'Fluency Speaking Drills', 'duration' => '18 phút', 'type' => 'Speaking', 'progress' => 36, 'topics' => ['Phản xạ', 'Nói liền mạch', 'Từ nối'], 'notes' => 'Nói theo ý tưởng, không dừng quá lâu.', 'video_url' => 'https://example.com/video/b2-2.mp4'],
-            ['title' => 'Reading for Meaning', 'duration' => '20 phút', 'type' => 'Reading', 'progress' => 58, 'topics' => ['Ý chính', 'Quan hệ giữa câu', 'Từ khóa ẩn'], 'notes' => 'Tập trung nghĩa tổng thể hơn là từng từ.', 'video_url' => 'https://example.com/video/b2-3.mp4'],
-            ['title' => 'B2 Final Review', 'duration' => '22 phút', 'type' => 'Review', 'progress' => 84, 'topics' => ['Ôn trọng tâm', 'Rà lỗi', 'Tự đánh giá'], 'notes' => 'Ôn lại các phần còn yếu trước khi chuyển cấp.', 'video_url' => 'https://example.com/video/b2-4.mp4'],
+            ['title' => 'Advanced Vocabulary Expansion', 'duration' => '14 phút', 'type' => 'Vocabulary', 'progress' => 15, 'topics' => ['Idioms', 'Phrasal verbs', 'Collocations'], 'notes' => 'Học từ đi kèm ví dụ để nhớ lâu.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Fluency Speaking Drills', 'duration' => '18 phút', 'type' => 'Speaking', 'progress' => 36, 'topics' => ['Phản xạ', 'Nói liền mạch', 'Từ nối'], 'notes' => 'Nói theo ý tưởng, không dừng quá lâu.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Reading for Meaning', 'duration' => '20 phút', 'type' => 'Reading', 'progress' => 58, 'topics' => ['Ý chính', 'Quan hệ giữa câu', 'Từ khóa ẩn'], 'notes' => 'Tập trung nghĩa tổng thể hơn là từng từ.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'B2 Final Review', 'duration' => '22 phút', 'type' => 'Review', 'progress' => 84, 'topics' => ['Ôn trọng tâm', 'Rà lỗi', 'Tự đánh giá'], 'notes' => 'Ôn lại các phần còn yếu trước khi chuyển cấp.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
         ],
         'test' => [
             'title' => 'B2 Fluency - Final Check',
@@ -301,10 +345,10 @@ $courses = [
         'level' => 'Skill Practice',
         'thumbnail_url' => 'public/images/reading.jpg',
         'lessons' => [
-            ['title' => 'Skimming for Main Idea', 'duration' => '10 phút', 'type' => 'Reading', 'progress' => 18, 'topics' => ['Đọc lướt', 'Tìm ý chính', 'Tiêu đề đoạn văn'], 'notes' => 'Đọc tiêu đề và câu mở đầu trước.', 'video_url' => 'https://example.com/video/reading-1.mp4'],
-            ['title' => 'Scanning for Details', 'duration' => '15 phút', 'type' => 'Reading', 'progress' => 42, 'topics' => ['Quét số liệu', 'Tìm tên riêng', 'Từ khóa'], 'notes' => 'Xác định từ khóa trước khi quét bài đọc.', 'video_url' => 'https://example.com/video/reading-2.mp4'],
-            ['title' => 'True/False/Not Given Practice', 'duration' => '18 phút', 'type' => 'Practice', 'progress' => 68, 'topics' => ['Đối chiếu thông tin', 'Bẫy suy luận', 'Không được thêm ý ngoài bài'], 'notes' => 'Chỉ chọn theo thông tin có thật trong bài.', 'video_url' => 'https://example.com/video/reading-3.mp4'],
-            ['title' => 'Timed Reading Review', 'duration' => '20 phút', 'type' => 'Review', 'progress' => 90, 'topics' => ['Quản lý thời gian', 'Rà lỗi', 'Tóm tắt chiến thuật'], 'notes' => 'Làm bài dưới áp lực thời gian để tăng tốc độ.', 'video_url' => 'https://example.com/video/reading-4.mp4'],
+            ['title' => 'Skimming for Main Idea', 'duration' => '10 phút', 'type' => 'Reading', 'progress' => 18, 'topics' => ['Đọc lướt', 'Tìm ý chính', 'Tiêu đề đoạn văn'], 'notes' => 'Đọc tiêu đề và câu mở đầu trước.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Scanning for Details', 'duration' => '15 phút', 'type' => 'Reading', 'progress' => 42, 'topics' => ['Quét số liệu', 'Tìm tên riêng', 'Từ khóa'], 'notes' => 'Xác định từ khóa trước khi quét bài đọc.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'True/False/Not Given Practice', 'duration' => '18 phút', 'type' => 'Practice', 'progress' => 68, 'topics' => ['Đối chiếu thông tin', 'Bẫy suy luận', 'Không được thêm ý ngoài bài'], 'notes' => 'Chỉ chọn theo thông tin có thật trong bài.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Timed Reading Review', 'duration' => '20 phút', 'type' => 'Review', 'progress' => 90, 'topics' => ['Quản lý thời gian', 'Rà lỗi', 'Tóm tắt chiến thuật'], 'notes' => 'Làm bài dưới áp lực thời gian để tăng tốc độ.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
         ],
         'test' => [
             'title' => 'Reading Skills - Final Check',
@@ -324,10 +368,10 @@ $courses = [
         'level' => 'Skill Practice',
         'thumbnail_url' => 'public/images/listening.jpg',
         'lessons' => [
-            ['title' => 'Keyword Recognition', 'duration' => '12 phút', 'type' => 'Listening', 'progress' => 15, 'topics' => ['Keyword', 'Âm nối', 'Tốc độ nghe'], 'notes' => 'Đừng cố nghe từng từ, hãy nghe ý chính.', 'video_url' => 'https://example.com/video/listening-1.mp4'],
-            ['title' => 'Numbers and Dates', 'duration' => '14 phút', 'type' => 'Listening', 'progress' => 34, 'topics' => ['Số đếm', 'Ngày tháng', 'Giờ giấc'], 'notes' => 'Ghi chú nhanh các con số bạn nghe được.', 'video_url' => 'https://example.com/video/listening-2.mp4'],
-            ['title' => 'Short Conversations', 'duration' => '16 phút', 'type' => 'Practice', 'progress' => 60, 'topics' => ['Hội thoại ngắn', 'Vai trò người nói', 'Suy luận từ ngữ cảnh'], 'notes' => 'Xác định ai đang nói và mục đích cuộc trò chuyện.', 'video_url' => 'https://example.com/video/listening-3.mp4'],
-            ['title' => 'Listening Review Test', 'duration' => '20 phút', 'type' => 'Review', 'progress' => 88, 'topics' => ['Tổng kết', 'Rà lỗi', 'Tăng độ chính xác'], 'notes' => 'Nghe lại phần sai để cải thiện phản xạ.', 'video_url' => 'https://example.com/video/listening-4.mp4'],
+            ['title' => 'Keyword Recognition', 'duration' => '12 phút', 'type' => 'Listening', 'progress' => 15, 'topics' => ['Keyword', 'Âm nối', 'Tốc độ nghe'], 'notes' => 'Đừng cố nghe từng từ, hãy nghe ý chính.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Numbers and Dates', 'duration' => '14 phút', 'type' => 'Listening', 'progress' => 34, 'topics' => ['Số đếm', 'Ngày tháng', 'Giờ giấc'], 'notes' => 'Ghi chú nhanh các con số bạn nghe được.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Short Conversations', 'duration' => '16 phút', 'type' => 'Practice', 'progress' => 60, 'topics' => ['Hội thoại ngắn', 'Vai trò người nói', 'Suy luận từ ngữ cảnh'], 'notes' => 'Xác định ai đang nói và mục đích cuộc trò chuyện.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Listening Review Test', 'duration' => '20 phút', 'type' => 'Review', 'progress' => 88, 'topics' => ['Tổng kết', 'Rà lỗi', 'Tăng độ chính xác'], 'notes' => 'Nghe lại phần sai để cải thiện phản xạ.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
         ],
         'test' => [
             'title' => 'Listening Skills - Final Check',
@@ -347,10 +391,10 @@ $courses = [
         'level' => 'Skill Practice',
         'thumbnail_url' => 'public/images/writing.jpg',
         'lessons' => [
-            ['title' => 'Sentence Building Basics', 'duration' => '12 phút', 'type' => 'Writing', 'progress' => 14, 'topics' => ['Câu đơn', 'Chủ-vị', 'Trật tự từ'], 'notes' => 'Viết câu ngắn, đúng trước rồi mới mở rộng.', 'video_url' => 'https://example.com/video/writing-1.mp4'],
-            ['title' => 'Paragraph Structure', 'duration' => '16 phút', 'type' => 'Writing', 'progress' => 36, 'topics' => ['Topic sentence', 'Supporting ideas', 'Conclusion'], 'notes' => 'Mỗi đoạn nên có ý chính rõ ràng.', 'video_url' => 'https://example.com/video/writing-2.mp4'],
-            ['title' => 'Grammar Correction Practice', 'duration' => '18 phút', 'type' => 'Practice', 'progress' => 62, 'topics' => ['Thì', 'Mạo từ', 'Sự hòa hợp chủ-vị'], 'notes' => 'Sửa lỗi lặp lại sẽ giúp tiến bộ nhanh.', 'video_url' => 'https://example.com/video/writing-3.mp4'],
-            ['title' => 'Writing Review Test', 'duration' => '20 phút', 'type' => 'Review', 'progress' => 90, 'topics' => ['Tự chỉnh lỗi', 'Rà cấu trúc', 'Cải thiện mạch văn'], 'notes' => 'Đọc lại bài và đánh dấu lỗi ngữ pháp.', 'video_url' => 'https://example.com/video/writing-4.mp4'],
+            ['title' => 'Sentence Building Basics', 'duration' => '12 phút', 'type' => 'Writing', 'progress' => 14, 'topics' => ['Câu đơn', 'Chủ-vị', 'Trật tự từ'], 'notes' => 'Viết câu ngắn, đúng trước rồi mới mở rộng.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Paragraph Structure', 'duration' => '16 phút', 'type' => 'Writing', 'progress' => 36, 'topics' => ['Topic sentence', 'Supporting ideas', 'Conclusion'], 'notes' => 'Mỗi đoạn nên có ý chính rõ ràng.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Grammar Correction Practice', 'duration' => '18 phút', 'type' => 'Practice', 'progress' => 62, 'topics' => ['Thì', 'Mạo từ', 'Sự hòa hợp chủ-vị'], 'notes' => 'Sửa lỗi lặp lại sẽ giúp tiến bộ nhanh.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Writing Review Test', 'duration' => '20 phút', 'type' => 'Review', 'progress' => 90, 'topics' => ['Tự chỉnh lỗi', 'Rà cấu trúc', 'Cải thiện mạch văn'], 'notes' => 'Đọc lại bài và đánh dấu lỗi ngữ pháp.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
         ],
         'test' => [
             'title' => 'Writing Skills - Final Check',
@@ -370,10 +414,10 @@ $courses = [
         'level' => 'Skill Practice',
         'thumbnail_url' => 'public/images/speak.jpg',
         'lessons' => [
-            ['title' => 'Pronunciation Fundamentals', 'duration' => '12 phút', 'type' => 'Speaking', 'progress' => 16, 'topics' => ['Âm cuối', 'Trọng âm', 'Ngắt câu'], 'notes' => 'Nói chậm rõ trước, sau đó tăng tốc dần.', 'video_url' => 'https://example.com/video/speaking-1.mp4'],
-            ['title' => 'Daily Topics Response', 'duration' => '15 phút', 'type' => 'Speaking', 'progress' => 38, 'topics' => ['Gia đình', 'Công việc', 'Sở thích'], 'notes' => 'Trả lời đủ ý rồi mở rộng thêm một câu.', 'video_url' => 'https://example.com/video/speaking-2.mp4'],
-            ['title' => 'Role-play Situations', 'duration' => '18 phút', 'type' => 'Practice', 'progress' => 63, 'topics' => ['Mua sắm', 'Hỏi đường', 'Đặt lịch'], 'notes' => 'Luyện tình huống đời thực để phản xạ tốt hơn.', 'video_url' => 'https://example.com/video/speaking-3.mp4'],
-            ['title' => 'Speaking Review Test', 'duration' => '20 phút', 'type' => 'Review', 'progress' => 90, 'topics' => ['Tự ghi âm', 'Tự nghe lại', 'Chỉnh phát âm'], 'notes' => 'Tự nghe lại câu trả lời để sửa điểm yếu.', 'video_url' => 'https://example.com/video/speaking-4.mp4'],
+            ['title' => 'Pronunciation Fundamentals', 'duration' => '12 phút', 'type' => 'Speaking', 'progress' => 16, 'topics' => ['Âm cuối', 'Trọng âm', 'Ngắt câu'], 'notes' => 'Nói chậm rõ trước, sau đó tăng tốc dần.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Daily Topics Response', 'duration' => '15 phút', 'type' => 'Speaking', 'progress' => 38, 'topics' => ['Gia đình', 'Công việc', 'Sở thích'], 'notes' => 'Trả lời đủ ý rồi mở rộng thêm một câu.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Role-play Situations', 'duration' => '18 phút', 'type' => 'Practice', 'progress' => 63, 'topics' => ['Mua sắm', 'Hỏi đường', 'Đặt lịch'], 'notes' => 'Luyện tình huống đời thực để phản xạ tốt hơn.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
+            ['title' => 'Speaking Review Test', 'duration' => '20 phút', 'type' => 'Review', 'progress' => 90, 'topics' => ['Tự ghi âm', 'Tự nghe lại', 'Chỉnh phát âm'], 'notes' => 'Tự nghe lại câu trả lời để sửa điểm yếu.', 'video_url' => 'https://www.youtube.com/watch?v=juKd26qkNAw'],
         ],
         'test' => [
             'title' => 'Speaking Skills - Final Check',
@@ -389,6 +433,10 @@ $courses = [
 ];
 
 echo "<h2>Seeding learning data</h2>";
+$courseVideoUrls = [];
+foreach ($courses as $course) {
+    $courseVideoUrls[$course['title']] = findCourseVideoUrl($course['title']);
+}
 $summary = [
     'courses' => 0,
     'lessons' => 0,
@@ -397,8 +445,12 @@ $summary = [
     'answers' => 0,
 ];
 
+$courseIdByTitle = [];
 foreach ($courses as $course) {
-    $courseId = upsertCourse($conn, $course, $teacherId);
+    $courseForSeed = $course;
+    $courseForSeed['promo_video_url'] = $courseVideoUrls[$course['title']] ?? '';
+    $courseId = upsertCourse($conn, $courseForSeed, $teacherId);
+    $courseIdByTitle[$course['title']] = $courseId;
     $summary['courses']++;
     echo '<p>Course ready: ' . htmlspecialchars($course['title']) . ' (ID ' . (int)$courseId . ')</p>';
 
@@ -411,7 +463,7 @@ foreach ($courses as $course) {
             'progress' => $lesson['progress'],
             'topics' => $lesson['topics'],
             'notes' => $lesson['notes'],
-            'video_url' => $lesson['video_url'],
+            'video_url' => $courseVideoUrls[$course['title']] ?? '',
             'order_index' => $index + 1,
         ]);
         $summary['lessons']++;
@@ -441,6 +493,84 @@ foreach ($courses as $course) {
         replaceAnswers($conn, $questionId, $answers);
         $summary['answers'] += count($answers);
         echo '<p style="margin-left:40px">Question ready: ' . htmlspecialchars($question['content']) . '</p>';
+    }
+}
+
+// Ensure all courses from the homepage catalog have real lessons as well.
+$catalogCourses = [
+    'TOEIC Intensive' => [
+        ['title' => 'Course Orientation & TOEIC Roadmap', 'description' => 'Làm quen lộ trình và mục tiêu TOEIC.', 'duration' => '12 phút', 'type' => 'Guide', 'progress' => 10, 'topics' => ['Mục tiêu TOEIC', 'Lịch học', 'Theo dõi tiến độ'], 'notes' => 'Chia mục tiêu thành các buổi ngắn và luyện đều cả nghe lẫn đọc.'],
+        ['title' => 'Reading Part 5 Grammar', 'description' => 'Ôn từ loại và dấu hiệu ngữ pháp thường gặp.', 'duration' => '18 phút', 'type' => 'Practice', 'progress' => 35, 'topics' => ['Từ loại', 'Thì', 'Hòa hợp chủ vị'], 'notes' => 'Đọc cả câu để tìm dấu hiệu ngữ pháp trước khi chọn đáp án.'],
+        ['title' => 'Listening Short Conversations', 'description' => 'Luyện bắt ý chính trong hội thoại ngắn.', 'duration' => '20 phút', 'type' => 'Practice', 'progress' => 60, 'topics' => ['Từ khóa', 'Ý chính', 'Ngữ cảnh'], 'notes' => 'Đọc câu hỏi trước, ghi từ khóa và nghe ý tổng thể.'],
+        ['title' => 'Mini Mock Test Review', 'description' => 'Tổng kết chiến thuật và rà lỗi làm bài.', 'duration' => '25 phút', 'type' => 'Review', 'progress' => 85, 'topics' => ['Canh thời gian', 'Rà lỗi', 'Chiến thuật'], 'notes' => 'Ghi lại nguyên nhân sai để tránh lặp lại ở lần sau.'],
+    ],
+    'IELTS Mastery' => [
+        ['title' => 'IELTS Band Roadmap', 'description' => 'Xây lộ trình luyện tập theo band mục tiêu.', 'duration' => '14 phút', 'type' => 'Guide', 'progress' => 10, 'topics' => ['Band mục tiêu', 'Bốn kỹ năng', 'Lịch học'], 'notes' => 'Đặt mục tiêu cụ thể cho từng kỹ năng và theo dõi mỗi tuần.'],
+        ['title' => 'IELTS Reading Strategies', 'description' => 'Thực hành skimming và scanning.', 'duration' => '18 phút', 'type' => 'Practice', 'progress' => 30, 'topics' => ['Skimming', 'Scanning', 'Matching headings'], 'notes' => 'Đọc câu hỏi trước rồi quét đoạn chứa thông tin liên quan.'],
+        ['title' => 'IELTS Writing Task 1', 'description' => 'Viết overview và so sánh số liệu.', 'duration' => '22 phút', 'type' => 'Practice', 'progress' => 58, 'topics' => ['Overview', 'So sánh', 'Từ nối'], 'notes' => 'Nêu xu hướng chính trước khi chọn các số liệu nổi bật.'],
+        ['title' => 'IELTS Speaking Mock', 'description' => 'Trả lời mạch lạc và phát triển ý.', 'duration' => '20 phút', 'type' => 'Speaking', 'progress' => 82, 'topics' => ['Trả lời đủ ý', 'Ví dụ', 'Phát triển câu trả lời'], 'notes' => 'Trả lời trực tiếp rồi mở rộng bằng lý do hoặc ví dụ.'],
+    ],
+    'B1 Communicative' => [
+        ['title' => 'B1 Core Vocabulary', 'description' => 'Học từ vựng theo tình huống hàng ngày.', 'duration' => '12 phút', 'type' => 'Vocabulary', 'progress' => 12, 'topics' => ['Daily routines', 'Work', 'Travel'], 'notes' => 'Ghi từ mới cùng một câu ví dụ của riêng bạn.'],
+        ['title' => 'B1 Grammar Essentials', 'description' => 'Ôn thì cơ bản và cấu trúc câu hỏi.', 'duration' => '16 phút', 'type' => 'Grammar', 'progress' => 34, 'topics' => ['Present perfect', 'Past simple', 'Questions'], 'notes' => 'Tự đặt câu khẳng định, phủ định và câu hỏi cho mỗi cấu trúc.'],
+        ['title' => 'B1 Daily Communication', 'description' => 'Luyện hội thoại tình huống quen thuộc.', 'duration' => '18 phút', 'type' => 'Speaking', 'progress' => 60, 'topics' => ['Greetings', 'Directions', 'Appointments'], 'notes' => 'Luyện thành tiếng các mẫu câu rồi thay thông tin bằng tình huống thật.'],
+        ['title' => 'B1 Review Practice', 'description' => 'Ôn từ vựng, ngữ pháp và giao tiếp.', 'duration' => '20 phút', 'type' => 'Review', 'progress' => 88, 'topics' => ['Tổng ôn', 'Tự kiểm tra', 'Phát âm'], 'notes' => 'Ôn lại phần còn yếu và ghi ra ba điểm cần luyện tiếp.'],
+    ],
+    'B2 Fluency' => [
+        ['title' => 'B2 Vocabulary Expansion', 'description' => 'Mở rộng idioms, phrasal verbs và collocations.', 'duration' => '14 phút', 'type' => 'Vocabulary', 'progress' => 15, 'topics' => ['Idioms', 'Phrasal verbs', 'Collocations'], 'notes' => 'Học cụm từ kèm ngữ cảnh, không học từ rời.'],
+        ['title' => 'B2 Fluency Speaking Drills', 'description' => 'Luyện nói liền mạch và dùng từ nối.', 'duration' => '18 phút', 'type' => 'Speaking', 'progress' => 36, 'topics' => ['Phản xạ', 'Từ nối', 'Ngắt nghỉ'], 'notes' => 'Nói theo ý chính trước, sau đó bổ sung lý do và ví dụ.'],
+        ['title' => 'B2 Reading for Meaning', 'description' => 'Đọc ý chính và quan hệ giữa các câu.', 'duration' => '20 phút', 'type' => 'Reading', 'progress' => 58, 'topics' => ['Ý chính', 'Liên kết câu', 'Từ khóa'], 'notes' => 'Dùng từ nối để nhận ra quan hệ giữa các ý.'],
+        ['title' => 'B2 Final Review', 'description' => 'Ôn trọng tâm và tự đánh giá tiến bộ.', 'duration' => '22 phút', 'type' => 'Review', 'progress' => 84, 'topics' => ['Ôn tập', 'Rà lỗi', 'Tự đánh giá'], 'notes' => 'Chọn hai điểm yếu và lập kế hoạch luyện tập tiếp theo.'],
+    ],
+];
+
+foreach (['Reading Skills', 'Listening Skills', 'Writing Skills', 'Speaking Skills'] as $skillCourseTitle) {
+    $courseId = $courseIdByTitle[$skillCourseTitle] ?? null;
+    if (!$courseId) continue;
+    $skill = strtolower(str_replace(' Skills', '', $skillCourseTitle));
+    $skillLessonsByType = [
+        'reading' => [
+            ['Skimming for Main Idea', 'Tìm ý chính qua tiêu đề và câu chủ đề.', ['Main idea', 'Topic sentence', 'Paragraph structure'], 'Đọc tiêu đề và câu đầu mỗi đoạn trước khi đọc chi tiết.'],
+            ['Scanning for Details', 'Tìm nhanh thông tin cụ thể trong bài.', ['Keywords', 'Names and dates', 'Synonyms'], 'Xác định dạng thông tin cần tìm rồi quét các từ khóa tương ứng.'],
+            ['True False Not Given', 'Phân biệt thông tin đúng, sai và không được nhắc đến.', ['Evidence', 'Contradiction', 'Not stated'], 'Chỉ chọn theo bằng chứng có trong bài đọc.'],
+            ['Timed Reading Review', 'Luyện đọc hiểu dưới giới hạn thời gian.', ['Timing', 'Question strategy', 'Review errors'], 'Theo dõi thời gian cho từng đoạn và xem lại câu sai.'],
+        ],
+        'listening' => [
+            ['Listening Keyword Recognition', 'Nhận ra từ khóa và từ đồng nghĩa khi nghe.', ['Keywords', 'Word stress', 'Paraphrase'], 'Đọc câu hỏi trước và chú ý cách diễn đạt tương đương.'],
+            ['Listening Numbers and Dates', 'Luyện nghe số, ngày tháng và giờ.', ['Numbers', 'Dates', 'Times'], 'Ghi nhanh con số và kiểm tra đơn vị đi kèm.'],
+            ['Short Conversation Practice', 'Nghe hội thoại và xác định mục đích người nói.', ['Speakers', 'Context', 'Purpose'], 'Tập trung vào ai nói với ai và họ cần làm gì.'],
+            ['Listening Review Test', 'Ôn nghe và phân tích câu trả lời sai.', ['Main idea', 'Distractors', 'Review'], 'Nghe lại đoạn chứa đáp án và ghi nguyên nhân chọn sai.'],
+        ],
+        'writing' => [
+            ['Sentence Building Basics', 'Xây câu rõ chủ ngữ, động từ và bổ ngữ.', ['Subject and verb', 'Word order', 'Punctuation'], 'Viết câu đơn chính xác trước khi thêm mệnh đề phụ.'],
+            ['Paragraph Structure', 'Sắp xếp câu chủ đề và ý hỗ trợ.', ['Topic sentence', 'Supporting ideas', 'Conclusion'], 'Mỗi đoạn nên phát triển một ý chính thống nhất.'],
+            ['Grammar Correction Practice', 'Tự rà lỗi ngữ pháp phổ biến.', ['Tenses', 'Articles', 'Agreement'], 'Đọc lại từng câu và kiểm tra chủ ngữ, động từ, thì.'],
+            ['Writing Review', 'Biên tập cấu trúc và độ mạch lạc.', ['Clarity', 'Transitions', 'Proofreading'], 'Rút gọn câu lặp ý và dùng từ nối đúng quan hệ.'],
+        ],
+        'speaking' => [
+            ['Pronunciation Fundamentals', 'Luyện âm cuối, trọng âm và nhịp câu.', ['Final sounds', 'Word stress', 'Pausing'], 'Ghi âm câu ngắn và nghe lại âm cuối của mỗi từ.'],
+            ['Daily Topics Response', 'Trả lời câu hỏi về đời sống hàng ngày.', ['Routine', 'Work', 'Interests'], 'Trả lời trực tiếp rồi thêm một lý do hoặc ví dụ.'],
+            ['Role-play Situations', 'Thực hành hội thoại theo vai.', ['Shopping', 'Directions', 'Appointments'], 'Đổi vai sau mỗi lượt để luyện cả hỏi và đáp.'],
+            ['Speaking Review Practice', 'Tự đánh giá độ rõ ràng và mạch lạc.', ['Recording', 'Fluency', 'Pronunciation'], 'Nghe lại bản ghi và chọn một điểm để cải thiện.'],
+        ],
+    ];
+    $skillLessons = $skillLessonsByType[$skill];
+    $catalogCourses[$skillCourseTitle] = [];
+    foreach ($skillLessons as $lesson) {
+        $catalogCourses[$skillCourseTitle][] = ['title' => $lesson[0], 'description' => $lesson[1], 'duration' => '15 phút', 'type' => ucfirst($skill), 'progress' => 0, 'topics' => $lesson[2], 'notes' => $lesson[3]];
+    }
+}
+
+foreach ($catalogCourses as $courseTitle => $catalogLessons) {
+    $courseId = $courseIdByTitle[$courseTitle] ?? null;
+    if (!$courseId) continue;
+    removePlaceholderLessons($conn, $courseId, array_column($catalogLessons, 'title'));
+    foreach ($catalogLessons as $index => $lesson) {
+        $lesson['video_url'] = $courseVideoUrls[$courseTitle] ?? findCourseVideoUrl($courseTitle);
+        $lesson['order_index'] = $index + 1;
+        $lessonId = upsertLesson($conn, $courseId, $lesson);
+        $summary['lessons']++;
+        echo '<p style="margin-left:20px">Catalog lesson ready: ' . htmlspecialchars($lesson['title']) . ' (ID ' . (int)$lessonId . ')</p>';
     }
 }
 

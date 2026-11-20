@@ -18,7 +18,8 @@ class CourseModel {
             $where = "WHERE c.teacher_id = '$teacherId'";
         }
         $sql = "SELECT c.*, u.full_name AS teacher_name,
-            (SELECT COUNT(*) FROM lessons l WHERE l.course_id = c.id) AS lessons,
+            (SELECT COUNT(*) FROM lessons l WHERE l.course_id = c.id AND l.status = 1) AS lessons,
+            (SELECT COUNT(*) FROM lessons l WHERE l.course_id = c.id AND l.status = 1 AND l.video_url <> '') AS video_lessons,
             (SELECT COUNT(*) FROM course_enrollments e WHERE e.course_id = c.id AND e.status IN ('active','completed')) AS students
             FROM courses c
             LEFT JOIN users u ON u.id = c.teacher_id

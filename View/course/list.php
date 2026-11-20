@@ -12,7 +12,7 @@
         
         <div class="filters">
             <input type="text" id="searchCourse" placeholder="Tìm kiếm khóa học...">
-            <select id="filterLevel">
+            <select id="listFilterLevel">
                 <option value="">Tất cả cấp độ</option>
                 <option value="Beginner">Cơ Bản</option>
                 <option value="Intermediate">Trung Cấp</option>
@@ -44,7 +44,9 @@
                         } else {
                             $priceVal = (float) $priceRaw;
                         }
-                        $detailLink = isset($course['id']) ? '?controller=course&action=detail&id=' . $course['id'] : ('?controller=course&action=detail&course=' . ($course['slug'] ?? ''));
+                        $detailLink = isset($course['id'])
+                            ? '?controller=course&action=detail&id=' . (int)$course['id']
+                            : '?controller=course&action=detail&course=' . urlencode($course['slug'] ?? 'toeic');
                     ?>
                     <div class="course-card">
                         <img src="<?php echo $img; ?>" alt="<?php echo htmlspecialchars($title); ?>" class="course-image">
